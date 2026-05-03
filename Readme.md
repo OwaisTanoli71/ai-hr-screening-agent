@@ -200,17 +200,6 @@ ai-hr-screening-agent/
 └── README.md
 ```
 
----
-
-## 🔒 Security Notes
-
-- Never commit your `.env` file or hardcoded API keys
-- All credentials are stored inside n8n's encrypted credential store
-- Webhook URLs should be kept private - treat them as secrets
-- Google OAuth tokens are managed by n8n and never stored in this repo
-
----
-
 ## 👤 Author
 
 **Muhammad Owais Arshad**
