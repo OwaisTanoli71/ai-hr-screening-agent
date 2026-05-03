@@ -1,6 +1,6 @@
 # 🤖 AI HR Screening Agent
 
-> An intelligent, fully automated HR screening pipeline built on **n8n** — powered by **OpenAI GPT-4**, **Gmail**, **Google Sheets**, and **Google Calendar**. Screens CVs, routes candidates, handles follow-ups, and ranks shortlisted applicants — all without human intervention.
+> An intelligent, fully automated HR screening pipeline built on **n8n** - powered by **OpenAI GPT-4**, **Gmail**, **Google Sheets**, and **Google Calendar**. Screens CVs, routes candidates, handles follow-ups, and ranks shortlisted applicants - all without human intervention.
 
 ![n8n](https://img.shields.io/badge/Built%20with-n8n-EA4B71?logo=n8n&logoColor=white)
 ![OpenAI](https://img.shields.io/badge/AI-OpenAI%20GPT--4-412991?logo=openai&logoColor=white)
@@ -12,7 +12,7 @@
 
 ## 📌 Overview
 
-Developed as a **4th Semester Artificial Intelligence Lab project**, this system automates the entire candidate screening pipeline — from CV submission to interview booking — using a multi-workflow n8n agent system backed by GPT-4. Traditional HR screening is slow, inconsistent, and expensive; this project eliminates those bottlenecks end-to-end.
+Developed as a **4th Semester Artificial Intelligence Lab project**, this system automates the entire candidate screening pipeline - from CV submission to interview booking - using a multi-workflow n8n agent system backed by GPT-4. Traditional HR screening is slow, inconsistent, and expensive; this project eliminates those bottlenecks end-to-end.
 
 The system handles:
 - Receiving and parsing CVs via webhook
@@ -33,7 +33,7 @@ The pipeline is split into **3 interconnected workflows**:
        │
        ▼
 ┌─────────────────────────────────┐
-│  WORKFLOW 1 — CV Intake &       │
+│  WORKFLOW 1 - CV Intake &       │
 │  Role Router                    │
 │                                 │
 │  • Extracts & validates CV text │
@@ -47,7 +47,7 @@ The pipeline is split into **3 interconnected workflows**:
              │ triggers
              ▼
 ┌─────────────────────────────────┐
-│  WORKFLOW 3 — AI Ranking Engine │
+│  WORKFLOW 3 - AI Ranking Engine │
 │                                 │
 │  • Runs every 6 hours           │
 │  • Fetches all shortlisted CVs  │
@@ -56,7 +56,7 @@ The pipeline is split into **3 interconnected workflows**:
 │    Google Sheets                │
 └─────────────────────────────────┘
 
-[Gmail Reply Trigger] ──► WORKFLOW 2 — Follow-Up Listener
+[Gmail Reply Trigger] ──► WORKFLOW 2 - Follow-Up Listener
                            • Watches for candidate email replies
                            • Re-evaluates with updated CV
                            • Updates Sheets: Pending → Resolved
@@ -67,12 +67,12 @@ The pipeline is split into **3 interconnected workflows**:
 
 ## ⚙️ Workflow Breakdown
 
-### Workflow 1 — CV Intake & Role Router
+### Workflow 1 - CV Intake & Role Router
 **Trigger:** Webhook (CV file upload)
 
 | Node | Purpose |
 |------|---------|
-| Webhook — CV Upload | Receives incoming CV submissions |
+| Webhook - CV Upload | Receives incoming CV submissions |
 | Validate Input & Extract Metadata | Sanitises input, extracts file metadata |
 | Extract CV Text | Parses PDF/DOCX into plain text |
 | CV Completeness Analyzer | Checks for required fields (education, experience, skills) |
@@ -87,7 +87,7 @@ The pipeline is split into **3 interconnected workflows**:
 
 ---
 
-### Workflow 2 — Follow-Up Listener & Re-Evaluator
+### Workflow 2 - Follow-Up Listener & Re-Evaluator
 **Trigger:** Gmail Watch (incoming candidate reply)
 
 | Node | Purpose |
@@ -105,7 +105,7 @@ The pipeline is split into **3 interconnected workflows**:
 
 ---
 
-### Workflow 3 — AI Candidate Ranking Engine
+### Workflow 3 - AI Candidate Ranking Engine
 **Trigger:** Schedule (every 6 hours) + Sub-workflow call
 
 | Node | Purpose |
@@ -143,22 +143,22 @@ The pipeline is split into **3 interconnected workflows**:
 - Google account with Gmail, Sheets, and Calendar APIs enabled
 - Google OAuth credentials configured in n8n
 
-### Step 1 — Clone this repository
+### Step 1 - Clone this repository
 
 ```bash
 git clone https://github.com/OwaisTanoli71/ai-hr-screening-agent.git
 ```
 
-### Step 2 — Import workflows into n8n
+### Step 2 - Import workflows into n8n
 
 1. Open your n8n instance
 2. Go to **Workflows** → **Import from file**
 3. Import in this order:
-   - `WORKFLOW 3 — AI Candidate Ranking Engine.json` *(import first — others call it)*
-   - `WORKFLOW 2 — Multi-Step Agent_ Follow-Up Listener & Re-Evaluator.json`
-   - `WORKFLOW 1 — CV Intake & Role Router.json`
+   - `WORKFLOW 3 - AI Candidate Ranking Engine.json` *(import first - others call it)*
+   - `WORKFLOW 2 - Multi-Step Agent_ Follow-Up Listener & Re-Evaluator.json`
+   - `WORKFLOW 1 - CV Intake & Role Router.json`
 
-### Step 3 — Configure credentials
+### Step 3 - Configure credentials
 
 In n8n, set up the following credentials:
 
@@ -169,7 +169,7 @@ In n8n, set up the following credentials:
 | Google OAuth (Sheets) | Workflow 1, 2, 3 |
 | Google OAuth (Calendar) | Workflow 1 |
 
-### Step 4 — Set up Google Sheets
+### Step 4 - Set up Google Sheets
 
 Create a Google Sheet with the following tabs:
 
@@ -181,12 +181,12 @@ Create a Google Sheet with the following tabs:
 | `Pending Follow-Up` | Awaiting candidate response |
 | `Rankings` | AI-generated ranked candidate list |
 
-### Step 5 — Activate workflows
+### Step 5 - Activate workflows
 
 1. Activate **Workflow 3** first
 2. Activate **Workflow 2**
 3. Activate **Workflow 1** last
-4. Copy the webhook URL from Workflow 1 — this is your CV submission endpoint
+4. Copy the webhook URL from Workflow 1 - this is your CV submission endpoint
 
 ---
 
@@ -194,9 +194,9 @@ Create a Google Sheet with the following tabs:
 
 ```
 ai-hr-screening-agent/
-├── WORKFLOW 1 — CV Intake & Role Router.json
-├── WORKFLOW 2 — Multi-Step Agent_ Follow-Up Listener & Re-Evaluator.json
-├── WORKFLOW 3 — AI Candidate Ranking Engine.json
+├── WORKFLOW 1 - CV Intake & Role Router.json
+├── WORKFLOW 2 - Multi-Step Agent_ Follow-Up Listener & Re-Evaluator.json
+├── WORKFLOW 3 - AI Candidate Ranking Engine.json
 └── README.md
 ```
 
@@ -206,7 +206,7 @@ ai-hr-screening-agent/
 
 - Never commit your `.env` file or hardcoded API keys
 - All credentials are stored inside n8n's encrypted credential store
-- Webhook URLs should be kept private — treat them as secrets
+- Webhook URLs should be kept private - treat them as secrets
 - Google OAuth tokens are managed by n8n and never stored in this repo
 
 ---
@@ -222,11 +222,12 @@ ai-hr-screening-agent/
 
 © 2026 Muhammad Owais Arshad. All rights reserved.
 
-This project was independently conceived and developed as an academic semester project. No part of this project — including workflows, logic, or documentation — may be copied, reused, or redistributed without explicit written permission from the author.
+This project was independently conceived and developed as an academic semester project. No part of this project - including workflows, logic, or documentation - may be copied, reused, or redistributed without explicit written permission from the author.
 
 ---
 
 ## ⭐ Acknowledgements
 
-- [n8n](https://n8n.io) — workflow automation platform
-- [OpenAI](https://openai.com) — GPT-4 language model
+- **[Abdullah Sajid](https://github.com/asfm2003)** - Lab Instructor, Artificial Intelligence - for guidance and support throughout this project
+- [n8n](https://n8n.io) - workflow automation platform
+- [OpenAI](https://openai.com) - GPT-4 language model
