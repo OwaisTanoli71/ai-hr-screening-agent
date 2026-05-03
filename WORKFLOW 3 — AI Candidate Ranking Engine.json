@@ -1,0 +1,365 @@
+{
+  "name": "WORKFLOW 3 — AI Candidate Ranking Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "decd70cc-5911-4491-a358-e7205a779940",
+      "name": "⏰ Schedule: Run Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -544,
+        -64
+      ],
+      "notes": "Also triggered by Workflow 1 via Execute Workflow node after each new shortlist. Runs on schedule every 6 hours as backup. Keeps rankings fresh."
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Shortlisted",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "3c6e02ef-ce4c-40de-9d9e-c92044dee0be",
+      "name": "📊 Sheets: Fetch All Shortlisted",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -176,
+        -64
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SFdGvsbOPNNKFx7c",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Reads ALL rows from the Shortlisted sheet. This is the full pool of candidates Gemini will rank comparatively."
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nif (!rows || rows.length === 0) {\n  throw new Error('No shortlisted candidates to rank yet.');\n}\n\nconst byRole = {};\nrows.forEach(row => {\n  const role = row['Job Role'] || 'Unknown';\n  if (!byRole[role]) byRole[role] = [];\n  byRole[role].push({\n    name: row['Name'],\n    email: row['Email'],\n    score: parseInt(row['Overall Score']) || 0,\n    technicalScore: parseInt(row['Technical Score']) || 0,\n    experienceScore: parseInt(row['Experience Score']) || 0,\n    recommendation: row['Recommendation'],\n    summary: row['Summary'],\n    sessionId: row['Session ID']\n  });\n});\n\nObject.keys(byRole).forEach(role => {\n  byRole[role].sort((a,b) => b.score - a.score);\n});\n\nreturn [{ json: { byRole, totalCandidates: rows.length, rolesFound: Object.keys(byRole), preparedAt: new Date().toISOString() } }];"
+      },
+      "id": "283e5481-365a-4d86-b858-47541827526d",
+      "name": "📋 Group & Prepare Candidates for Ranking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        -64
+      ],
+      "notes": "Groups candidates by job role. Sorts each group by score. Prepares a clean JSON payload for Gemini's comparative analysis. Gemini doesn't just look at scores — it does holistic comparison."
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.item.json;\nconst raw = resp.output?.[0]?.content?.[0]?.text || '';\nif (!raw) throw new Error('OpenAI ranking returned no content');\nconst cleaned = raw.replace(/```json|```/g, '').trim();\nlet parsed;\ntry { parsed = JSON.parse(cleaned); } catch(e) { throw new Error('Failed to parse ranking JSON: ' + raw.substring(0,200)); }\n\nconst flatRows = [];\n(parsed.rankings || []).forEach(c => {\n  flatRows.push({\n    rank: c.rank,\n    role: c.role,\n    name: c.name,\n    email: c.email,\n    score: c.score,\n    summary: c.summary\n  });\n});\n\nreturn flatRows.map(r => ({ json: r }));"
+      },
+      "id": "3c4b5b7b-90f4-46e6-bf01-29ba0637a64b",
+      "name": "⚙️ Parse & Flatten Rankings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        -64
+      ],
+      "notes": "Parses Gemini's ranking JSON and flattens it into individual rows — one per candidate — for writing to the Rankings sheet. Each row includes rank, role, name, score, reasoning, and recommendation."
+    },
+    {
+      "parameters": {
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 277742575,
+          "mode": "list",
+          "cachedResultName": "Rankings",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg/edit#gid=277742575"
+        }
+      },
+      "id": "ec8f5fad-df3a-4d24-ad85-600aafb73108",
+      "name": "🗑️ Sheets: Clear Old Rankings",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        704,
+        -64
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SFdGvsbOPNNKFx7c",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Clears the Rankings tab before writing fresh rankings. This ensures the sheet always shows the current state, not accumulated duplicates."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 277742575,
+          "mode": "list",
+          "cachedResultName": "Rankings",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg/edit#gid=277742575"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Rank": "={{ $json.rank }}",
+            "Role": "={{ $json.role }}",
+            "Name": "={{ $json.name }}",
+            "Email": "={{ $json.email }}",
+            "Score": "={{ $json.score }}",
+            "Summary": "={{ $json.summary }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Rank",
+              "displayName": "Rank",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Role",
+              "displayName": "Role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Score",
+              "displayName": "Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Summary",
+              "displayName": "Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "d0453eac-a5c4-41e5-8eac-5e785da51f30",
+      "name": "📊 Sheets: Write Fresh Rankings",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        928,
+        -64
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SFdGvsbOPNNKFx7c",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Writes the fresh comparative rankings to the Rankings tab. Highlights the overall top pick with a star. Pool notes are written next to the #1 ranked candidate to summarize Gemini's holistic observations."
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "GPT-4"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=You are an expert HR analyst. Rank the following candidates for each role based on their scores and profiles.\n\nCandidates data:\n{{ JSON.stringify($json.byRole) }}\n\nReturn a JSON array called \"rankings\" where each item has:\n- role\n- rank (1 = best)\n- name\n- email\n- score\n- summary (1 sentence why they rank here)\n\nReturn only valid JSON, no markdown."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        208,
+        80
+      ],
+      "id": "aecc931e-fcd5-4896-bf51-ba262f958aec",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "nLTohL2hitO0TXKu",
+          "name": "OpenAI account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -560,
+        -272
+      ],
+      "id": "3464a47a-dd83-4f04-b2a3-a1155d2137e8",
+      "name": "When Executed by Another Workflow"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "⏰ Schedule: Run Every 6 Hours": {
+      "main": [
+        [
+          {
+            "node": "📊 Sheets: Fetch All Shortlisted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Sheets: Fetch All Shortlisted": {
+      "main": [
+        [
+          {
+            "node": "📋 Group & Prepare Candidates for Ranking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Parse & Flatten Rankings": {
+      "main": [
+        [
+          {
+            "node": "🗑️ Sheets: Clear Old Rankings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗑️ Sheets: Clear Old Rankings": {
+      "main": [
+        [
+          {
+            "node": "📊 Sheets: Write Fresh Rankings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Group & Prepare Candidates for Ranking": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Parse & Flatten Rankings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "📊 Sheets: Fetch All Shortlisted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b260dfb7-d375-47a1-8f89-8bd47dfe459d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bda9f764e29d04379ad34fd0d4055c79d6ee761410d3409182b8a0e2c8c860eb"
+  },
+  "id": "cPr97W49sATnjOS3",
+  "tags": []
+}

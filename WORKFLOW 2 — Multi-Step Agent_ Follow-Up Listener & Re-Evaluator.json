@@ -1,0 +1,440 @@
+{
+  "name": "WORKFLOW 2 — Multi-Step Agent: Follow-Up Listener & Re-Evaluator",
+  "nodes": [
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "GPT-4"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=You are an expert HR recruiter re-evaluating a candidate who provided additional information.\n\nCandidate: {{ $json.candidateName }}\nEmail: {{ $json.candidateEmail }}\nJob Role: {{ $json.jobRole }}\n\nUpdated information provided by candidate:\n{{ $json.enrichedContent }}\n\nBased on this updated information, provide a new evaluation. Return only valid JSON:\n{\n  \"overallScore\": 0-100,\n  \"technicalScore\": 0-100,\n  \"experienceScore\": 0-100,\n  \"recommendation\": \"shortlist\" or \"review\" or \"reject\",\n  \"summary\": \"2-3 sentence evaluation\",\n  \"improved\": true or false\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        128,
+        -112
+      ],
+      "id": "14d307a1-3e44-465c-a581-02e129591db8",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "nLTohL2hitO0TXKu",
+          "name": "OpenAI account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "readStatus": "unread"
+        }
+      },
+      "id": "f5dcb19a-ae55-4ad6-9078-d70fbfbb8b81",
+      "name": "Gmail: Watch Candidate Replies",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1088,
+        -112
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "OZ5agFQesVFnkUhL",
+          "name": "Gmail OAuth2 API"
+        }
+      },
+      "notes": "MULTI-STEP AGENT TRIGGER: Polls inbox every minute for replies to the 'Action Required' follow-up emails. Filters for unread emails with 'Re: Your Application' subject. This closes the agent loop — candidate replies trigger re-evaluation."
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = $input.item.json;\nconst fromRaw = email.From || email.from || '';\nconst from = typeof fromRaw === 'object' ? (fromRaw.value?.[0]?.address || fromRaw.text || JSON.stringify(fromRaw)) : fromRaw;\nconst subject = email.subject || '';\nconst body = email.text || email.snippet || '';\n\nconst sessionMatch = body.match(/Session ID: ([a-zA-Z0-9\\-]+)/);\nconst sessionId = sessionMatch ? sessionMatch[1] : 'UNKNOWN-' + Date.now();\n\nconst hasAttachment = Object.keys($input.item.binary || {}).length > 0;\n\nconst emailMatch = from.match(/[\\w.+\\-]+@[\\w\\-]+\\.[\\w.]+/);\nconst candidateEmail = emailMatch ? emailMatch[0] : '';\n\nif (!candidateEmail) throw new Error('From field value: ' + JSON.stringify(fromRaw));\n\nreturn [{\n  json: {\n    sessionId,\n    candidateEmail,\n    from,\n    subject,\n    body,\n    hasAttachment,\n    receivedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "8464d58d-eb17-41e3-9b65-c2fef867cb64",
+      "name": "Extract Reply & Session Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -864,
+        -112
+      ],
+      "notes": "Parses the candidate's reply email. Extracts the session ID from the footer of the original follow-up email (so we can match it to the pending application in Sheets). Detects if an updated CV was attached."
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1871780866,
+          "mode": "list",
+          "cachedResultName": "Pending Follow-Up",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg/edit#gid=1871780866"
+        },
+        "options": {}
+      },
+      "id": "57bd2247-f9ce-42bf-9740-049fc9146a94",
+      "name": "Sheets: Find Pending Application",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -640,
+        -112
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SFdGvsbOPNNKFx7c",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "AGENT MEMORY: Looks up the candidate's email in the 'Pending Follow-Up' sheet to retrieve their original job role, session ID, and submission details. This is how the agent remembers context across multiple steps."
+    },
+    {
+      "parameters": {
+        "jsCode": "const replyData = $('Extract Reply & Session Context').item.json;\nconst pendingRow = $input.item.json;\n\nif (!pendingRow || !pendingRow['Job Role']) {\n  throw new Error('No pending application found for ' + replyData.candidateEmail + '. Either already processed or session expired.');\n}\n\n// Build enriched CV content by combining original context with reply\nconst enrichedContent = `\nCANDIDATE FOLLOW-UP REPLY:\n===========================\n${replyData.replyBody}\n\nORIGINAL APPLICATION CONTEXT:\n==============================\nName: ${pendingRow['Name']}\nEmail: ${pendingRow['Email']}\nRole Applied: ${pendingRow['Role Applied']}\nOriginal Missing Fields: ${pendingRow['Missing Fields']}\nOriginal Completeness Score: ${pendingRow['Completeness Score']}/100\n`;\n\nreturn [{\n  json: {\n    sessionId: pendingRow['Session ID'] || replyData.sessionId,\n    candidateEmail: replyData.candidateEmail,\n    candidateName: pendingRow['Name'],\n    jobRole: pendingRow['Role Applied'],\n    enrichedContent,\n    hasAttachment: replyData.hasAttachment,\n    isReEvaluation: true,\n    replyReceivedAt: replyData.replyReceivedAt\n  },\n  binary: $('Extract Reply & Session Context').item.binary\n}];"
+      },
+      "id": "d02bdc71-ea1e-414f-b34c-52ad34276450",
+      "name": "Merge Reply with Original Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        -112
+      ],
+      "notes": "Combines the candidate's reply with their original application context from Sheets memory. Builds an enriched content block that Gemini uses for re-evaluation. This gives Gemini full context: what was missing, what was provided, and the original role."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.hasAttachment }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              },
+              "id": "7dc9edd6-be64-4ae6-a457-48344e760cc9"
+            },
+            {
+              "id": "f0d3e27b-850f-4590-8fbc-826928b465a4",
+              "leftValue": "={{ $json.hasAttachment }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b741b7f2-837f-487a-8656-1b15e9b61c15",
+      "name": "Has Updated CV?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        -112
+      ],
+      "notes": "If the candidate attached an updated CV, extract its text. If they just replied with text info, use the reply body directly. Both paths converge at Gemini re-evaluation."
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "febc6301-1b57-40c2-ab6d-0387fceb928b",
+      "name": "Extract Updated CV Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        -416
+      ],
+      "notes": "Extracts text from the newly attached CV file for full re-evaluation."
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.item.json;\nconst content = resp.output?.[0]?.content?.[0]?.text || '';\nif (!content) throw new Error('OpenAI re-evaluation returned no content');\n\nlet parsed;\ntry {\n  const cleaned = content.replace(/```json|```/g, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch(e) {\n  throw new Error('Failed to parse re-eval JSON: ' + content.substring(0, 200));\n}\n\nconst ctx = $('Merge Reply with Original Context').item.json;\nparsed._sessionId = ctx.sessionId;\nparsed._jobRole = ctx.jobRole;\nparsed._candidateEmail = ctx.candidateEmail;\nparsed._candidateName = ctx.candidateName;\nparsed._isReEvaluation = true;\nparsed._processedAt = new Date().toISOString();\n\nreturn [{ json: parsed }];"
+      },
+      "id": "d4d4f751-648a-486a-8737-c2a2209c6767",
+      "name": "Parse Re-Evaluation Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -112
+      ],
+      "notes": "Parses Gemini's re-evaluation JSON. Flags result as a re-evaluation so downstream sheets logging notes it appropriately."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1871780866,
+          "mode": "list",
+          "cachedResultName": "Pending Follow-Up",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg/edit#gid=1871780866"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $json._candidateName }}",
+            "Email": "={{ $json._candidateEmail }}",
+            "Job Role": "={{ $json._jobRole }}",
+            "Submitted At": "={{ $json._processedAt }}",
+            "Status": "Resolved"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job Role",
+              "displayName": "Job Role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Submitted At",
+              "displayName": "Submitted At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "9580e5ff-07d4-448e-b1ef-3f8f65257809",
+      "name": "Sheets: Update Pending → Resolved",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        688,
+        -112
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SFdGvsbOPNNKFx7c",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "MEMORY UPDATE: Updates the Pending Follow-Up row with the final decision. The agent now considers this application resolved. The row shows the journey: incomplete → follow-up sent → re-evaluated → final decision."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "ITJTszdALMog5834",
+          "mode": "id",
+          "cachedResultUrl": "/workflow/ITJTszdALMog5834"
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "636c3cc4-75ca-4dc7-a040-5c3851363112",
+      "name": "Send to Decision Pipeline",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        -112
+      ],
+      "notes": "Passes the re-evaluated result back into Workflow 1's decision pipeline (router → email → sheets → calendar). Reuses all the same downstream logic rather than duplicating it."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Parse Re-Evaluation Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: Watch Candidate Replies": {
+      "main": [
+        [
+          {
+            "node": "Extract Reply & Session Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Reply & Session Context": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Find Pending Application",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Find Pending Application": {
+      "main": [
+        [
+          {
+            "node": "Merge Reply with Original Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Reply with Original Context": {
+      "main": [
+        [
+          {
+            "node": "Has Updated CV?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Updated CV?": {
+      "main": [
+        [
+          {
+            "node": "Extract Updated CV Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Updated CV Text": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Re-Evaluation Result": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Update Pending → Resolved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Update Pending → Resolved": {
+      "main": [
+        [
+          {
+            "node": "Send to Decision Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "08a00fec-afe1-45ab-8522-300c52a6a0a5",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bda9f764e29d04379ad34fd0d4055c79d6ee761410d3409182b8a0e2c8c860eb"
+  },
+  "id": "TSCOXO0yuc9OdRTH",
+  "tags": []
+}

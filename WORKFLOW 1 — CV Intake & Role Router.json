@@ -1,0 +1,1034 @@
+{
+  "name": "WORKFLOW 1 — CV Intake & Role Router",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "cPr97W49sATnjOS3",
+          "mode": "id",
+          "cachedResultUrl": "/workflow/cPr97W49sATnjOS3"
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "b9ce0912-4d28-4100-80fb-eb35538c5ce3",
+      "name": "🔗 Trigger Ranking Engine",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        -96,
+        -96
+      ],
+      "notes": "After every shortlist, asynchronously triggers Workflow 3 (Ranking Engine) to re-rank all shortlisted candidates. waitForSubWorkflow=false means this fires and forgets — doesn't block the main pipeline."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "ab075882-3c51-44fc-ab6c-c426e36126f3",
+              "leftValue": "={{ $json.isComplete }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1472,
+        -224
+      ],
+      "id": "fb08a4af-3e01-437d-9e15-9b7010acb04f",
+      "name": "CVComplete"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "GPT-4"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=You are an expert HR recruiter. Score the following CV for the role of {{ $json.jobRole }}.\n\nCV:\n{{ $json.cvText }}\n\nReturn a JSON object with:\n- overallScore (0-100)\n- technicalScore (0-100)\n- experienceScore (0-100)\n- recommendation (shortlist/review/reject)\n- summary (2-3 sentence explanation)"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        -1344,
+        -560
+      ],
+      "id": "ef7ce5cb-7eba-4d83-adcb-1ac3423389a1",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "k042bR9Tt5L3phTP",
+          "name": "OpenAI account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cv-intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "912d3532-1fe2-4633-b19d-5a9de03b9512",
+      "name": "Webhook —     CV Upload",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2432,
+        16
+      ],
+      "webhookId": "8ac9e825-52e2-42f1-82e3-05a1252c5f62",
+      "notesInFlow": true,
+      "notes": "ENTRY POINT. Receives CV upload via HTTP POST multipart/form-data.\n\nExpected fields:\n- cv_file: PDF or DOCX binary\n- applicant_name: string\n- applicant_email: string\n- job_role: 'AI Engineer' | 'Data Analyst' | 'Backend Developer'\n\nWebhook URL: https://YOUR-N8N/webhook/cv-intake"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.item.json.body || $input.item.json;\nconst files = $input.item.binary || {};\nconst fileKey = Object.keys(files)[0];\nif (!fileKey) throw new Error('ERROR: No CV file attached. Send as multipart/form-data key: cv_file');\n\nconst allowedRoles = ['AI Engineer', 'Data Analyst', 'Backend Developer', 'Product Manager', 'Finance Analyst', 'UI/UX Designer'];\nconst role = body.job_role || 'AI Engineer';\nif (!allowedRoles.includes(role)) {\n  throw new Error(`Invalid role: ${role}. Must be one of: ${allowedRoles.join(', ')}`);\n}\n\nconst applicantEmail = body.applicant_email || 'pending_extraction';\n\nreturn [{\n  json: {\n    applicantEmail,\n    applicantName: body.applicant_name || 'Candidate',\n    jobRole: role,\n    submittedAt: new Date().toISOString(),\n    sessionId: `${Date.now()}-${Math.random().toString(36).substr(2,6)}`\n  },\n  binary: { data: files[fileKey] }\n}];"
+      },
+      "id": "f031d847-34b4-4465-989b-9ad8484d3109",
+      "name": "Validate Input & Extract Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2160,
+        16
+      ],
+      "notesInFlow": true,
+      "notes": "Validates all required fields. Assigns a unique sessionId for tracking this application through the entire multi-step agent loop. Throws descriptive errors if fields are missing."
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "f9ae0a07-c602-4728-ae95-4f2ee8dfdd55",
+      "name": "Extract CV Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -1920,
+        16
+      ],
+      "notesInFlow": true,
+      "notes": "Converts PDF or DOCX binary to plain text string. This raw text is what Gemini analyzes."
+    },
+    {
+      "parameters": {
+        "jsCode": "const cvText = $input.item.json.text || '';\nconst meta = $('Validate Input & Extract Metadata').item.json;\n\n// ── CV AUTHENTICITY CHECK ──────────────────────────────────────────\nlet cvLikenessScore = 0;\nconst cvSignals = [\n  { pattern: /(curriculum vitae|resume|\\bcv\\b)/i, weight: 30 },\n  { pattern: /(work experience|professional experience|employment history)/i, weight: 20 },\n  { pattern: /(education|academic background|qualifications)/i, weight: 15 },\n  { pattern: /(skills|technical skills|core competencies)/i, weight: 15 },\n  { pattern: /(objective|summary|profile|about me)/i, weight: 10 },\n  { pattern: /(references|referees|linkedin\\.com|github\\.com)/i, weight: 10 },\n  { pattern: /([a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,})/, weight: 10 },\n  { pattern: /(internship|volunteering|certification|award)/i, weight: 10 },\n];\n\nlet nonCvScore = 0;\nconst nonCvSignals = [\n  { pattern: /(lab \\d+|lab task|lab report)/i, weight: 40 },\n  { pattern: /(learning objectives|by the end of this (lab|course))/i, weight: 40 },\n  { pattern: /(marking criteria|marks will be awarded|component.*weight)/i, weight: 40 },\n  { pattern: /(deliverables|submit the following|submission)/i, weight: 30 },\n  { pattern: /(abstract|literature review|research methodology)/i, weight: 30 },\n  { pattern: /(part \\d+:|task requirements|practical pipeline)/i, weight: 30 },\n  { pattern: /(fine-tuning|dataset creation|model selection|LoRA|QLoRA)/i, weight: 25 },\n  { pattern: /(invoice|receipt|total amount|payment due)/i, weight: 50 },\n  { pattern: /(dear sir|to whom it may concern|sincerely yours)/i, weight: 30 },\n  { pattern: /(step \\d+:|figure \\d+|table \\d+)/i, weight: 15 },\n];\n\nfor (const signal of cvSignals) {\n  if (signal.pattern.test(cvText)) cvLikenessScore += signal.weight;\n}\nfor (const signal of nonCvSignals) {\n  if (signal.pattern.test(cvText)) nonCvScore += signal.weight;\n}\n\nconst wordCount = cvText.split(/\\s+/).filter(Boolean).length;\n\n// Determine if document is actually a CV\nconst isValidCV = (\n  wordCount >= 100 &&\n  cvLikenessScore >= 20 &&\n  cvLikenessScore > nonCvScore &&\n  !(nonCvScore >= 40 && cvLikenessScore < 30)\n);\n\n// If not a valid CV — force it to the incomplete/follow-up path\n// by setting completenessScore to 0 and adding a clear missing field\nif (!isValidCV) {\n  return [{\n    json: {\n      applicantEmail: meta.applicantEmail,\n      applicantName: meta.applicantName,\n      jobRole: meta.jobRole,\n      submittedAt: meta.submittedAt,\n      sessionId: meta.sessionId,\n      cvText: cvText.substring(0, 8000),\n      wordCount,\n      cvLikenessScore,\n      nonCvScore,\n      completenessScore: 0,\n      missingFields: [\n        'valid CV document — the uploaded file does not appear to be a CV or resume. Please upload your personal CV including your Experience, Education, and Skills sections.'\n      ],\n      isComplete: false,\n      requiresFollowUp: true,\n      invalidDocument: true\n    }\n  }];\n}\n// ─────────────────────────────────────────────────────────────────\n\n// Normal completeness check for valid CVs\nconst hasEmail = /[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}/.test(cvText);\nconst hasPhone = /[\\+\\d][\\d\\s\\-().]{8,}/.test(cvText);\nconst hasEducation = /(university|college|bachelor|master|degree|b\\.s|b\\.e|m\\.s|phd)/i.test(cvText);\nconst hasExperience = /(experience|internship|worked|employed|project|developed|built)/i.test(cvText);\nconst hasSkills = /(python|java|sql|machine learning|tensorflow|pytorch|react|node|django)/i.test(cvText);\n\nlet completenessScore = 0;\nif (wordCount > 200) completenessScore += 20;\nif (wordCount > 400) completenessScore += 10;\nif (hasEmail) completenessScore += 15;\nif (hasPhone) completenessScore += 10;\nif (hasEducation) completenessScore += 20;\nif (hasExperience) completenessScore += 15;\nif (hasSkills) completenessScore += 10;\n\nconst missingFields = [];\nif (!hasEmail) missingFields.push('contact email');\nif (!hasPhone) missingFields.push('phone number');\nif (!hasEducation) missingFields.push('education/degree details');\nif (!hasExperience) missingFields.push('work experience or projects');\nif (!hasSkills) missingFields.push('technical skills section');\n\nreturn [{\n  json: {\n    applicantEmail: meta.applicantEmail,\n    applicantName: meta.applicantName,\n    jobRole: meta.jobRole,\n    submittedAt: meta.submittedAt,\n    sessionId: meta.sessionId,\n    cvText: cvText.substring(0, 8000),\n    wordCount,\n    cvLikenessScore,\n    nonCvScore,\n    completenessScore,\n    missingFields,\n    isComplete: completenessScore >= 70 && missingFields.length <= 1,\n    requiresFollowUp: completenessScore < 70 || missingFields.length >= 2,\n    invalidDocument: false\n  }\n}];"
+      },
+      "id": "c6a9f33e-6792-4c18-a003-a827241f404f",
+      "name": "CV Completeness Analyzer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1664,
+        16
+      ],
+      "notesInFlow": true,
+      "notes": "AGENT INTELLIGENCE STEP 1: Analyzes CV completeness before sending to Gemini. Checks for presence of email, phone, education, experience, and skills sections. Calculates a completeness score. If score < 70 or 2+ sections missing, flags requiresFollowUp = true. This triggers the multi-step agent loop instead of immediate scoring."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, sessionId: $('CV Completeness Analyzer').item.json.sessionId, message: $('CV Completeness Analyzer').item.json.requiresFollowUp ? 'CV incomplete — follow-up email sent to candidate' : 'CV received and being processed', status: 'processing' }) }}",
+        "options": {}
+      },
+      "id": "42fb333a-e193-4706-8d1f-521a46a409f3",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -1456,
+        304
+      ],
+      "notes": "Immediately responds to the HTTP caller with a session ID and status. The pipeline continues asynchronously — caller doesn't need to wait."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.applicantEmail }}",
+        "subject": "Your Application — Additional Information Required",
+        "message": "=<!DOCTYPE html><html><body style='margin:0;padding:0;font-family:\"Segoe UI\",Arial,sans-serif;background:#fef9ee;'><table width='100%' cellpadding='0' cellspacing='0'><tr><td align='center' style='padding:40px 15px;'><table width='600' cellpadding='0' cellspacing='0' style='background:#ffffff;border-radius:16px;overflow:hidden;'><tr><td style='background:linear-gradient(135deg,#b45309 0%,#d97706 50%,#f59e0b 100%);padding:48px 40px 40px;'><p style='margin:0 0 16px;font-size:12px;color:#fde68a;letter-spacing:3px;text-transform:uppercase;font-weight:600;'>Action Required</p><h1 style='color:#ffffff;margin:0 0 8px;font-size:28px;font-weight:700;letter-spacing:-0.5px;'>Complete Your Application</h1><p style='color:#fde68a;margin:0;font-size:14px;'>Additional information needed to proceed</p></td></tr><tr><td style='padding:40px;'><p style='margin:0 0 8px;font-size:18px;color:#111827;font-weight:600;'>Dear {{ $('CV Completeness Analyzer').item.json.applicantName }},</p><p style='margin:16px 0 24px;font-size:15px;color:#4b5563;line-height:1.8;'>Thank you for applying for the <strong style='color:#b45309;'>{{ $('CV Completeness Analyzer').item.json.jobRole }}</strong> position. Our AI screening system has reviewed your CV and identified some sections that appear to be missing or incomplete.</p><table width='100%' cellpadding='0' cellspacing='0' style='background:#fffbeb;border-radius:12px;border:1px solid #fde68a;margin-bottom:28px;'><tr><td style='padding:24px 28px;'><p style='margin:0 0 16px;font-size:13px;font-weight:700;color:#92400e;letter-spacing:1px;text-transform:uppercase;'>Missing Information</p>{{ $('CV Completeness Analyzer').item.json.missingFields.map(f => '<table width=\"100%\" style=\"margin-bottom:10px;\"><tr><td style=\"width:28px;\"><div style=\"width:22px;height:22px;background:#f59e0b;border-radius:50%;text-align:center;line-height:22px;font-size:12px;color:#fff;font-weight:700;\">!</div></td><td style=\"font-size:14px;color:#374151;padding-left:8px;\">' + f + '</td></tr></table>').join('') }}</td></tr></table><table width='100%' cellpadding='0' cellspacing='0' style='background:#f0fdf4;border-radius:12px;border-left:4px solid #22c55e;margin-bottom:32px;'><tr><td style='padding:20px 24px;'><p style='margin:0 0 6px;font-size:13px;font-weight:700;color:#15803d;'>How to complete your application</p><p style='margin:0;font-size:13px;color:#374151;line-height:1.7;'>Simply <strong>reply to this email</strong> with an updated CV or provide the missing details directly in your reply. Your application will be automatically re-evaluated within minutes.</p></td></tr></table><p style='margin:0;font-size:15px;color:#4b5563;line-height:1.8;'>We look forward to reviewing your complete application. If you have any questions, please do not hesitate to reply to this email.</p><p style='margin:20px 0 0;font-size:15px;color:#111827;'>Best regards,<br/><strong>HR Recruitment Team</strong></p></td></tr><tr><td style='background:#f9fafb;padding:20px 40px;border-top:1px solid #f0f0f0;'><table width='100%'><tr><td><p style='font-size:11px;color:#9ca3af;margin:0;'>Processed by <strong>AI HR Screening Agent</strong> &nbsp;&bull;&nbsp; Session: {{ $('CV Completeness Analyzer').item.json.sessionId }}</p></td><td align='right'><p style='font-size:11px;color:#9ca3af;margin:0;'>{{ $now.format(\"DD MMM YYYY\") }}</p></td></tr></table></td></tr></table></td></tr></table></body></html>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "d77fbb86-5da1-405d-9d0f-c3203756ee63",
+      "name": "Email: Request Missing Info",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -1216,
+        32
+      ],
+      "webhookId": "30457dba-c565-4af4-9040-e2a7a1be7df6",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "OZ5agFQesVFnkUhL",
+          "name": "Gmail OAuth2 API"
+        }
+      },
+      "notes": "MULTI-STEP AGENT — STEP 1: Sends a structured email listing exactly which CV sections are missing. Tells candidate to reply with updated info. The reply is caught by Workflow 2 (Follow-Up Listener) which re-triggers the analysis."
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.item.json;\nconst content = resp.output?.[0]?.content?.[0]?.text || '';\nlet parsed;\ntry {\n  const cleaned = content.replace(/```json|```/g, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch(e) {\n  throw new Error('Failed to parse OpenAI JSON: ' + content.substring(0, 300));\n}\n\nif (!parsed.overallScore || !parsed.recommendation) {\n  throw new Error('OpenAI JSON missing required sections');\n}\n\nconst meta = $('CV Completeness Analyzer').item.json;\nparsed._sessionId = meta.sessionId;\nparsed._jobRole = meta.jobRole;\nparsed._submittedAt = meta.submittedAt;\nparsed._completenessScore = meta.completenessScore;\nparsed._applicantEmail = meta.applicantEmail;\nparsed._applicantName = meta.applicantName;\nparsed._processedAt = new Date().toISOString();\n\nreturn [{ json: parsed }];"
+      },
+      "id": "579388ef-6499-4768-83fc-944c27ae414f",
+      "name": "Parse OpenAI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -976,
+        -64
+      ],
+      "notes": "Parses Gemini's JSON response. Merges session metadata. Falls back to form-provided name/email if Gemini couldn't extract them from the CV text. Validates all required sections exist."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Follow-Up",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('CVComplete').item.json.applicantName }}",
+            "Email": "={{ $('CVComplete').item.json.applicantEmail }}",
+            "Job Role": "={{ $('CVComplete').item.json.jobRole }}",
+            "Submitted At": "={{ $('CVComplete').item.json.submittedAt }}",
+            "Status": "Pending Follow-Up"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Job Role",
+              "displayName": "Job Role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Submitted At",
+              "displayName": "Submitted At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "44f0a156-53b4-4a53-9fef-51291d8b8041",
+      "name": "Sheets: Log Pending Follow-Up",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -992,
+        320
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SFdGvsbOPNNKFx7c",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json._applicantEmail }}",
+        "subject": "=Your Application Update - {{ $json._jobRole }}",
+        "message": "=<!DOCTYPE html><html><body style='margin:0;padding:0;font-family:\"Segoe UI\",Arial,sans-serif;background:#0a0a0f;'><table width='100%' cellpadding='0' cellspacing='0'><tr><td align='center' style='padding:48px 15px;'><table width='620' cellpadding='0' cellspacing='0' style='background:#111118;border-radius:16px;overflow:hidden;border:1px solid #1e1e2e;'><tr><td style='background:linear-gradient(135deg,#0d0d0d 0%,#111118 100%);padding:48px 40px 40px;border-bottom:1px solid #1e1e2e;'><table width='100%'><tr><td><p style='margin:0 0 14px;font-size:10px;color:#ff2e7e;letter-spacing:4px;text-transform:uppercase;font-weight:700;'>NeuralCore Recruitment</p><h1 style='color:#ffffff;margin:0 0 10px;font-size:26px;font-weight:700;letter-spacing:-0.5px;line-height:1.2;'>Application<br/>Status Update</h1><p style='color:#555570;margin:0;font-size:13px;font-family:monospace;'>{{ $json._jobRole }} Position &nbsp;//&nbsp; {{ $now.format(\"DD MMM YYYY\") }}</p></td><td align='right' valign='top'><div style='width:56px;height:56px;border-radius:50%;border:2px solid #ff2e7e;text-align:center;line-height:56px;font-size:22px;color:#ff2e7e;'>✕</div></td></tr></table></td></tr><tr><td style='padding:40px;'><p style='margin:0 0 20px;font-size:16px;color:#e0e0f0;font-weight:500;'>Dear {{ $json._applicantName }},</p><p style='margin:0 0 24px;font-size:14px;color:#888899;line-height:1.9;'>Thank you for applying for the <strong style='color:#e0e0f0;'>{{ $json._jobRole }}</strong> position at NeuralCore. After careful review by our AI screening system and recruitment team, we regret to inform you that we will not be moving forward with your application at this time.</p><table width='100%' cellpadding='0' cellspacing='0' style='background:#0d0d14;border-radius:10px;border:1px solid #1e1e2e;margin-bottom:28px;'><tr><td style='padding:24px 28px;'><p style='margin:0 0 18px;font-size:10px;font-weight:700;color:#444460;letter-spacing:3px;text-transform:uppercase;'>Assessment Summary</p><table width='100%'><tr><td style='padding:8px 0;border-bottom:1px solid #1a1a28;'><span style='font-size:13px;color:#555570;font-family:monospace;'>role</span></td><td align='right' style='padding:8px 0;border-bottom:1px solid #1a1a28;'><span style='font-size:13px;color:#e0e0f0;font-family:monospace;'>{{ $json._jobRole }}</span></td></tr><tr><td style='padding:8px 0;border-bottom:1px solid #1a1a28;'><span style='font-size:13px;color:#555570;font-family:monospace;'>overall_score</span></td><td align='right' style='padding:8px 0;border-bottom:1px solid #1a1a28;'><span style='font-size:13px;color:#ff2e7e;font-family:monospace;font-weight:700;'>{{ $json.overallScore }} / 100</span></td></tr><tr><td style='padding:8px 0;border-bottom:1px solid #1a1a28;'><span style='font-size:13px;color:#555570;font-family:monospace;'>technical_score</span></td><td align='right' style='padding:8px 0;border-bottom:1px solid #1a1a28;'><span style='font-size:13px;color:#7b4fff;font-family:monospace;font-weight:700;'>{{ $json.technicalScore }} / 100</span></td></tr><tr><td style='padding:8px 0;'><span style='font-size:13px;color:#555570;font-family:monospace;'>experience_score</span></td><td align='right' style='padding:8px 0;'><span style='font-size:13px;color:#7b4fff;font-family:monospace;font-weight:700;'>{{ $json.experienceScore }} / 100</span></td></tr></table></td></tr></table><table width='100%' cellpadding='0' cellspacing='0' style='background:#0d0d14;border-radius:10px;border-left:3px solid #ff2e7e;margin-bottom:28px;'><tr><td style='padding:20px 24px;'><p style='margin:0 0 8px;font-size:10px;font-weight:700;color:#ff2e7e;letter-spacing:3px;text-transform:uppercase;'>AI Feedback</p><p style='margin:0;font-size:13px;color:#888899;line-height:1.8;font-family:monospace;'>{{ $json.summary }}</p></td></tr></table><p style='margin:0 0 16px;font-size:14px;color:#888899;line-height:1.9;'>We encourage you to keep developing your skills and welcome you to apply again in the future. We wish you the very best in your career journey.</p><p style='margin:0;font-size:14px;color:#e0e0f0;'>Best regards,<br/><strong>NeuralCore Recruitment Team</strong></p></td></tr><tr><td style='background:#0a0a0f;padding:20px 40px;border-top:1px solid #1e1e2e;'><table width='100%'><tr><td><p style='font-size:10px;color:#333345;margin:0;font-family:monospace;letter-spacing:1px;'>PROCESSED BY AI HR AGENT &nbsp;//&nbsp; SESSION: {{ $json._sessionId }}</p></td><td align='right'><p style='font-size:10px;color:#333345;margin:0;font-family:monospace;'>{{ $now.format(\"DD MMM YYYY\") }}</p></td></tr></table></td></tr></table></td></tr></table></body></html>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "9da877c0-05ba-4137-a294-2a74c560a7e1",
+      "name": "Email: Polite Rejection",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -656,
+        528
+      ],
+      "webhookId": "b2b41e28-bf6e-4acb-a1cc-3c2c2b5f8e43",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "OZ5agFQesVFnkUhL",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1113021699,
+          "mode": "list",
+          "cachedResultName": "Rejected",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg/edit#gid=1113021699"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $json._applicantName }}",
+            "Email": "={{ $json._applicantEmail }}",
+            "Job Role": "={{ $json._jobRole }}",
+            "Overall Score": "={{ $json.overallScore }}",
+            "Technical Score": "={{ $json.technicalScore }}",
+            "Experience Score": "={{ $json.experienceScore }}",
+            "Recommendation": "={{ $json.recommendation }}",
+            "Summary": "={{ $json.summary }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Job Role",
+              "displayName": "Job Role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Overall Score",
+              "displayName": "Overall Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Technical Score",
+              "displayName": "Technical Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Experience Score",
+              "displayName": "Experience Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Recommendation",
+              "displayName": "Recommendation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Summary",
+              "displayName": "Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "6411b687-5ffa-4cc2-9432-4192c4376da0",
+      "name": "Sheets: Log Rejected",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -336,
+        352
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SFdGvsbOPNNKFx7c",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1030377484,
+          "mode": "list",
+          "cachedResultName": "For Review",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg/edit#gid=1030377484"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $json._applicantName }}",
+            "Email": "={{ $json._applicantEmail }}",
+            "Job Role": "={{ $json._jobRole }}",
+            "Overall Score": "={{ $json.overallScore }}",
+            "Technical Score": "={{ $json.technicalScore }}",
+            "Experience Score": "={{ $json.experienceScore }}",
+            "Recommendation": "={{ $json.recommendation }}",
+            "Summary": "={{ $json.summary }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Job Role",
+              "displayName": "Job Role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Overall Score",
+              "displayName": "Overall Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Technical Score",
+              "displayName": "Technical Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Experience Score",
+              "displayName": "Experience Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Recommendation",
+              "displayName": "Recommendation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Summary",
+              "displayName": "Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "adb37025-040a-4fed-91cf-e33a648a51cf",
+      "name": "Sheets: Log For Review",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -128,
+        144
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SFdGvsbOPNNKFx7c",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Shortlisted",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1rm0VYBtUGiLFSYjXGQv4XX86j-10-r7mTMRhcOQr8lg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $json._applicantName }}",
+            "Email": "={{ $json._applicantEmail }}",
+            "Job Role": "={{ $json._jobRole }}",
+            "Overall Score": "={{ $json.overallScore }}",
+            "Technical Score": "={{ $json.technicalScore }}",
+            "Experience Score": "={{ $json.experienceScore }}",
+            "Recommendation": "={{ $json.recommendation }}",
+            "Summary": "={{ $json.summary }}",
+            "Session ID": "={{ $json._sessionId }}",
+            "Processed At": "={{ $json._processedAt }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job Role",
+              "displayName": "Job Role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Overall Score",
+              "displayName": "Overall Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Technical Score",
+              "displayName": "Technical Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Experience Score",
+              "displayName": "Experience Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Recommendation",
+              "displayName": "Recommendation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Summary",
+              "displayName": "Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Session ID",
+              "displayName": "Session ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Processed At",
+              "displayName": "Processed At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "dac593c1-1d0f-45cb-9a56-2eba8d22a6f7",
+      "name": "Sheets: Log Shortlisted",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        32,
+        -432
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SFdGvsbOPNNKFx7c",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "value": "primary",
+          "__rl": true,
+          "mode": "list"
+        },
+        "start": "={{ $now.toISO() }}",
+        "end": "={{ $now.plus({hours: 1}).toISO() }}",
+        "additionalFields": {
+          "attendees": "={{ $json.candidate_info.email }}",
+          "description": "=CANDIDATE: {{ $json._applicantName }}\nROLE: {{ $json._jobRole }}\nSCORE: {{ $json.overallScore }}/100\nTECHNICAL: {{ $json.technicalScore }}/100\nEXPERIENCE: {{ $json.experienceScore }}/100\n\nSUMMARY:\n{{ $json.summary }}",
+          "sendUpdates": "all",
+          "summary": "=Interview – {{ $json._applicantName }} – {{ $json._jobRole }}"
+        }
+      },
+      "id": "1d7914f9-e840-4142-bbd6-ae8a91cd8242",
+      "name": "Calendar: Book Interview",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        -496
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "vHSFpHpeg7ZpHUfQ",
+          "name": "Google Calendar OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json._applicantEmail }}",
+        "subject": "=Interview Invitation - {{ $json._jobRole }}",
+        "message": "=<!DOCTYPE html><html><body style='margin:0;padding:0;font-family:\"Segoe UI\",Arial,sans-serif;background:#eef2f7;'><table width='100%' cellpadding='0' cellspacing='0'><tr><td align='center' style='padding:40px 15px;'><table width='600' cellpadding='0' cellspacing='0' style='background:#ffffff;border-radius:16px;overflow:hidden;'><tr><td style='background:linear-gradient(135deg,#0f0c6e 0%,#1a1a9e 50%,#2563eb 100%);padding:48px 40px 40px;'><table width='100%'><tr><td><p style='margin:0 0 16px;font-size:12px;color:#93c5fd;letter-spacing:3px;text-transform:uppercase;font-weight:600;'>AI HR Screening Agent</p><h1 style='color:#ffffff;margin:0 0 8px;font-size:32px;font-weight:700;letter-spacing:-0.5px;'>Interview Invitation</h1><p style='color:#bfdbfe;margin:0;font-size:14px;'>{{ $json._jobRole }} Position &nbsp;&bull;&nbsp; {{ $now.format(\"MMMM YYYY\") }}</p></td><td align='right' valign='top'><div style='background:rgba(255,255,255,0.15);border-radius:12px;padding:14px 20px;text-align:center;'><p style='margin:0;color:#bfdbfe;font-size:11px;text-transform:uppercase;letter-spacing:2px;'>Score</p><p style='margin:4px 0 0;color:#ffffff;font-size:36px;font-weight:700;line-height:1;'>{{ $json.overallScore }}</p><p style='margin:2px 0 0;color:#93c5fd;font-size:12px;'>/100</p></div></td></tr></table></td></tr><tr><td style='padding:40px;'><p style='margin:0 0 8px;font-size:18px;color:#111827;font-weight:600;'>Dear {{ $json._applicantName }},</p><p style='margin:16px 0 24px;font-size:15px;color:#4b5563;line-height:1.8;'>We are delighted to inform you that your application for the <strong style='color:#1a1a9e;'>{{ $json._jobRole }}</strong> position has been reviewed and you have been <strong style='color:#059669;'>shortlisted for an interview</strong>.</p><p style='margin:0 0 32px;font-size:15px;color:#4b5563;line-height:1.8;'>Your profile stood out amongst other applicants. A calendar invite with full interview details will be sent to you shortly. Please keep an eye on your inbox.</p><table width='100%' cellpadding='0' cellspacing='0' style='background:#f8faff;border-radius:12px;border:1px solid #e0e7ff;margin-bottom:32px;'><tr><td style='padding:24px 28px;'><p style='margin:0 0 20px;font-size:13px;font-weight:700;color:#1e1b4b;letter-spacing:1px;text-transform:uppercase;'>Assessment Breakdown</p><table width='100%'><tr><td style='padding:10px 0;border-bottom:1px solid #e8ecf4;'><span style='font-size:14px;color:#6b7280;'>Role Applied</span></td><td align='right' style='padding:10px 0;border-bottom:1px solid #e8ecf4;'><span style='font-size:14px;font-weight:600;color:#1a1a9e;'>{{ $json._jobRole }}</span></td></tr><tr><td style='padding:10px 0;border-bottom:1px solid #e8ecf4;'><span style='font-size:14px;color:#6b7280;'>Overall Score</span></td><td align='right' style='padding:10px 0;border-bottom:1px solid #e8ecf4;'><span style='background:#dbeafe;color:#1e40af;font-size:13px;font-weight:700;padding:3px 10px;border-radius:20px;'>{{ $json.overallScore }} / 100</span></td></tr><tr><td style='padding:10px 0;border-bottom:1px solid #e8ecf4;'><span style='font-size:14px;color:#6b7280;'>Technical Score</span></td><td align='right' style='padding:10px 0;border-bottom:1px solid #e8ecf4;'><span style='background:#d1fae5;color:#065f46;font-size:13px;font-weight:700;padding:3px 10px;border-radius:20px;'>{{ $json.technicalScore }} / 100</span></td></tr><tr><td style='padding:10px 0;'><span style='font-size:14px;color:#6b7280;'>Experience Score</span></td><td align='right' style='padding:10px 0;'><span style='background:#fef3c7;color:#92400e;font-size:13px;font-weight:700;padding:3px 10px;border-radius:20px;'>{{ $json.experienceScore }} / 100</span></td></tr></table></td></tr></table><table width='100%' cellpadding='0' cellspacing='0' style='background:linear-gradient(135deg,#f0f4ff,#e8f0fe);border-radius:12px;border-left:4px solid #2563eb;margin-bottom:32px;'><tr><td style='padding:20px 24px;'><p style='margin:0 0 6px;font-size:13px;font-weight:700;color:#1e40af;'>What happens next?</p><p style='margin:0;font-size:13px;color:#374151;line-height:1.7;'>You will receive a calendar invite with the interview time, platform link, and any preparation materials within 24 hours.</p></td></tr></table><p style='margin:0;font-size:15px;color:#4b5563;line-height:1.8;'>If you have any questions or need to reschedule, simply reply to this email.</p><p style='margin:20px 0 0;font-size:15px;color:#111827;'>Warm regards,<br/><strong>HR Screening Team</strong></p></td></tr><tr><td style='background:#f9fafb;padding:24px 40px;border-top:1px solid #f0f0f0;'><table width='100%'><tr><td><p style='font-size:11px;color:#9ca3af;margin:0;'>Processed by <strong>AI HR Screening Agent</strong> &nbsp;&bull;&nbsp; Session: {{ $json._sessionId }}</p></td><td align='right'><p style='font-size:11px;color:#9ca3af;margin:0;'>{{ $now.format(\"DD MMM YYYY\") }}</p></td></tr></table></td></tr></table></td></tr></table></body></html>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "93d33ca7-e738-4e28-8933-75ba5f7b401e",
+      "name": "Email: Interview Invitation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -576,
+        -736
+      ],
+      "webhookId": "be1d61b5-4925-440b-9390-0023718a0057",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "OZ5agFQesVFnkUhL",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.recommendation }}",
+              "rightValue": "shortlist",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "7180f554-9cf4-47c0-a3b3-3a3e8d27bc8e"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f900e922-502f-49a4-9ff4-320177677d2e",
+      "name": "Decision Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -784,
+        -128
+      ],
+      "notes": "Routes SHORTLIST to email+calendar+sheets. Non-shortlist goes to second router."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.recommendation }}",
+              "rightValue": "review",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "6f7d1b19-2b8b-4d3a-8944-1232c522c74e"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8c0b6db3-6069-40e6-b9e4-d6ae0c1ffc67",
+      "name": "Review vs Reject",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        128
+      ],
+      "notes": "Splits REVIEW (log only) from REJECT (email + log)."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "CVComplete": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email: Request Missing Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Parse OpenAI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook —     CV Upload": {
+      "main": [
+        [
+          {
+            "node": "Validate Input & Extract Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input & Extract Metadata": {
+      "main": [
+        [
+          {
+            "node": "Extract CV Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract CV Text": {
+      "main": [
+        [
+          {
+            "node": "CV Completeness Analyzer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CV Completeness Analyzer": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "CVComplete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email: Request Missing Info": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Log Pending Follow-Up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse OpenAI Response": {
+      "main": [
+        [
+          {
+            "node": "Decision Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision Router": {
+      "main": [
+        [
+          {
+            "node": "Email: Interview Invitation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sheets: Log Shortlisted",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Calendar: Book Interview",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔗 Trigger Ranking Engine",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Review vs Reject",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review vs Reject": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Log For Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email: Polite Rejection",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sheets: Log Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5948d131-1f20-4a3a-8539-96cf5c64b610",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bda9f764e29d04379ad34fd0d4055c79d6ee761410d3409182b8a0e2c8c860eb"
+  },
+  "id": "ITJTszdALMog5834",
+  "tags": []
+}
