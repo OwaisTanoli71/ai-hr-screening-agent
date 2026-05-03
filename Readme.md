@@ -10,13 +10,6 @@
 
 ---
 
-## 📽️ Demo Video
-
-> 🎬 **[Watch Full Demo on YouTube](https://YOUR_YOUTUBE_LINK_HERE)**
-> *(Replace this link after uploading your video to YouTube)*
-
----
-
 ## 📌 Overview
 
 Developed as a **4th Semester Artificial Intelligence Lab project**, this system automates the entire candidate screening pipeline — from CV submission to interview booking — using a multi-workflow n8n agent system backed by GPT-4. Traditional HR screening is slow, inconsistent, and expensive; this project eliminates those bottlenecks end-to-end.
